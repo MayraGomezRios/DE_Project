@@ -1,3 +1,104 @@
 {
-	"folders": []
+# analisis_delitos_gto.py
+# Análisis completo de delitos en Guanajuato por año, tipo y modalidad
+
+import pandas as pd
+import zipfile
+import os
+
+# Rutas y constantes
+ZIP_PATH = '/mnt/data/mexico_crime.csv.zip'
+CSV_NAME = 'mexico_crime.csv'
+OUTPUT_DIR = 'outputs'
+
+# Crear carpeta de salida
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# =============================
+# FUNCIONES
+# =============================
+
+def load_data(zip_path: str, csv_name: str) -> pd.DataFrame:
+    """Carga un DataFrame desde un archivo CSV contenido en un ZIP."""
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        with z.open(csv_name) as f:
+            df = pd.read_csv(f)
+    return df
+
+def filter_by_entity(df: pd.DataFrame, entidad: str = 'Guanajuato') -> pd.DataFrame:
+    """Filtra los registros de una entidad específica."""
+    return df[df['entity'].str.strip().str.lower() == entidad.lower()]
+
+def group_by_year_type_modalidad(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrupa los delitos por año, tipo y modalidad."""
+    grouped = df.groupby(['year', 'type_of_crime', 'crime_mode']).size().reset_index(name='count')
+    return grouped.sort_values(['year', 'count'], ascending=[True, False])
+
+def save_summary(df_summary: pd.DataFrame, filename: str):
+    """Guarda el resumen en formato CSV."""
+    df_summary.to_csv(os.path.join(OUTPUT_DIR, filename), index=False, encoding='utf-8')
+
+# =============================
+# MAIN
+# =============================
+
+def main():
+    df = load_data(ZIP_PATH, CSV_NAME)
+    df_gto = filter_by_entity(df, 'Guanajuato')
+    df_summary = group_by_year_type_modalidad(df_gto)
+    save_summary(df_summary, 'delitos_gto_resumen.csv')
+    print("Resumen guardado en outputs/delitos_gto_resumen.csv")
+
+if __name__ == '__main__':
+    main()
+
+import pandas as pd
+import dash
+from dash import dcc, html
+import plotly.express as px
+
+# Cargar el resumen de datos
+df = pd.read_csv('outputs/delitos_gto_resumen.csv')
+
+# Inicializar app Dash
+app = dash.Dash(__name__)
+app.title = "Delitos en Guanajuato"
+
+# Layout del dashboard
+app.layout = html.Div([
+    html.H1("Delitos en Guanajuato por Año, Tipo y Modalidad"),
+    
+    dcc.Dropdown(
+        id='tipo-delito',
+        options=[{'label': tipo, 'value': tipo} for tipo in df['type_of_crime'].unique()],
+        value=df['type_of_crime'].unique()[0],
+        clearable=False
+    ),
+
+    dcc.Graph(id='grafico-modalidad'),
+
+    dcc.Graph(
+        id='grafico-total-anual',
+        figure=px.bar(
+            df.groupby("year")["count"].sum().reset_index(),
+            x="year", y="count", title="Total de delitos por año"
+        )
+    )
+])
+
+# Callback para actualizar gráfico por modalidad
+@app.callback(
+    dash.dependencies.Output('grafico-modalidad', 'figure'),
+    [dash.dependencies.Input('tipo-delito', 'value')]
+)
+def actualizar_grafico_modalidad(tipo):
+    filtrado = df[df['type_of_crime'] == tipo]
+    fig = px.bar(filtrado, x='crime_mode', y='count', color='crime_mode',
+                 title=f"Modalidades más frecuentes ({tipo})", text='count')
+    return fig
+
+# Ejecutar app
+if __name__ == '__main__':
+    app.run_server(debug=True)
+
 }
